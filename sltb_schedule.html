@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="si">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>ශ්‍රී ලංගම ධාවන කාලසටහන්</title>
+<style>
+  body {
+    margin:0;
+    font-family:"Noto Sans", Arial, sans-serif;
+    background-color:#001933;
+    color:#ffffff;
+    position:relative;
+  }
+
+  .container {
+    max-width:1100px;
+    margin:40px auto;
+    padding:20px;
+  }
+
+  header {
+    text-align:center;
+    margin-bottom:25px;
+    position:relative;
+  }
+
+  /* Logo at top-left */
+  .logo {
+    position:absolute;
+    top:0;
+    left:0;
+    max-height:80px;
+    max-width:150px;
+    margin:10px;
+  }
+
+  /* Clock at top-right, highlighted */
+  .clock {
+    position:absolute;
+    top:0;
+    right:0;
+    margin:10px;
+    font-size:1rem;
+    font-weight:600;
+    color:#ffffff;
+    background: #0066cc;
+    padding:6px 12px;
+    border-radius:8px;
+    font-family: monospace;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+  }
+
+  h1 {
+    font-size:2.5rem;
+    margin:0;
+    letter-spacing:0.6px;
+  }
+
+  .controls {
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+    justify-content:center;
+    align-items:center;
+    margin-bottom:20px;
+  }
+
+  input[type="search"] {
+    padding:10px 12px;
+    border-radius:6px;
+    border:none;
+    min-width:260px;
+    font-size:1rem;
+    outline:none;
+  }
+
+  button {
+    padding:10px 16px;
+    border-radius:6px;
+    border:none;
+    cursor:pointer;
+    font-weight:600;
+    font-size:0.95rem;
+    transition: all 0.15s ease;
+  }
+
+  .btn-search {
+    background-color:#0066cc;
+    color:#fff;
+  }
+  .btn-search:hover { opacity:0.85; }
+
+  .btn-reset, .btn-refresh {
+    background-color:#004c99;
+    color:#fff;
+  }
+  .btn-reset:hover, .btn-refresh:hover { opacity:0.85; }
+
+  .meta, .resultCount {
+    text-align:center;
+    font-size:0.9rem;
+    margin-bottom:12px;
+    color:#cccccc;
+  }
+
+  .table-wrap {
+    overflow-x:auto;
+    border-radius:6px;
+  }
+
+  table {
+    width:100%;
+    border-collapse:collapse;
+    min-width:700px;
+  }
+
+  thead th {
+    text-align:left;
+    padding:10px;
+    border-bottom:1px solid #555;
+    background-color:#00264d;
+    position:sticky;
+    top:0;
+  }
+
+  tbody td {
+    padding:8px;
+    border-bottom:1px solid #003366;
+  }
+
+  tbody tr:hover {
+    background-color:#004c99;
+  }
+
+  @keyframes fadeSlideUp {
+    0% { opacity:0; transform: translateY(20px);}
+    100% { opacity:1; transform: translateY(0);}
+  }
+
+  tbody tr {
+    opacity:0;
+    animation-name: fadeSlideUp;
+    animation-duration:0.6s;
+    animation-fill-mode:forwards;
+  }
+
+  .not-found {
+    padding:18px;
+    text-align:center;
+    color:#cccccc;
+  }
+
+  @media (max-width:720px){
+    h1{ font-size:1.8rem; }
+    input[type="search"]{ min-width:160px; }
+    table{ min-width:520px; font-size:0.95rem; }
+    .clock { font-size:0.85rem; }
+    .logo { max-height:60px; max-width:120px; }
+  }
+</style>
+</head>
+<body>
+
+<img src="http://localhost/Sri_Lanka_Transport_Board_logo.png" alt="SLTB Logo" class="logo" />
+<div class="clock" id="clock"></div>
+
+<div class="container" role="main">
+  <header>
+    <h1>ශ්‍රී ලංගම ධාවන කාලසටහන්</h1>
+  </header>
+
+  <div class="controls" aria-label="search controls">
+    <div class="search-input">
+      <label for="q" style="position:absolute;left:-9999px">Search</label>
+      <input id="q" type="search" placeholder="Search by route, stop, time..." aria-label="Search schedules" />
+    </div>
+    <button id="btnSearch" class="btn-search" title="Search">Search</button>
+    <button id="btnReset" class="btn-reset" title="Reset">Reset</button>
+    <button id="btnRefresh" class="btn-refresh" title="Refresh now">Refresh Now</button>
+  </div>
+
+  <!-- Result count -->
+  <div class="resultCount" id="resultCount"></div>
+
+  <div class="table-wrap" id="tableWrap" aria-live="polite">
+    <!-- Table injected here -->
+  </div>
+</div>
+
+<script>
+/* Clock */
+function updateClock(){
+  const now = new Date();
+  const str = now.toLocaleString();
+  document.getElementById('clock').textContent = str;
+}
+setInterval(updateClock,1000);
+updateClock();
+
+/* CSV Fetch & Table */
+const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTg-puJh7Q_hMJaCaSLWUDcyVqtMX6VA7hPxX9AsHx1RjIRvTxLE3yM54O2wgBPrPiXGs4FWdsk9ePa/pub?output=csv";
+const REFRESH_INTERVAL_MS = 120000; // 2 minutes
+
+let rawData = [];
+let headers = [];
+
+const qInput = document.getElementById('q');
+const btnSearch = document.getElementById('btnSearch');
+const btnReset = document.getElementById('btnReset');
+const btnRefresh = document.getElementById('btnRefresh');
+const tableWrap = document.getElementById('tableWrap');
+const resultCountEl = document.getElementById('resultCount');
+
+function parseCSV(text){
+  const lines = [];
+  let i=0, cur='', row=[], inQuotes=false;
+  while(i<text.length){
+    const ch=text[i];
+    if(ch === '"'){
+      if(inQuotes && text[i+1]==='"'){ cur+='"'; i+=2; continue; }
+      inQuotes=!inQuotes; i++; continue;
+    }
+    if(ch===',' && !inQuotes){ row.push(cur); cur=''; i++; continue; }
+    if((ch==='\n'||ch==='\r') && !inQuotes){
+      if(ch==='\r' && text[i+1]==='\n'){ i++; }
+      row.push(cur); lines.push(row); row=[]; cur=''; i++; continue;
+    }
+    cur+=ch; i++;
+  }
+  if(cur!=='' || inQuotes || row.length){ row.push(cur); lines.push(row); }
+  return lines;
+}
+
+function rowsToObjects(rows){
+  if(!rows||rows.length===0) return {headers:[], items:[]};
+  const hdr = rows[0].map(h=>h.trim());
+  const items=[];
+  for(let r=1;r<rows.length;r++){
+    const row=rows[r];
+    if(row.length===1 && row[0].trim()==='') continue;
+    const obj={};
+    for(let c=0;c<hdr.length;c++){ obj[hdr[c]] = (row[c]!==undefined?row[c].trim():""); }
+    items.push(obj);
+  }
+  return {headers:hdr, items};
+}
+
+function escapeHtml(str){
+  if(str===null||str===undefined) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                   .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function buildTable(headers, items){
+  if(!items || items.length === 0){
+    tableWrap.innerHTML='<div class="not-found">දත්ත නොමැත.</div>'; 
+    return; 
+  }
+  const thead = headers.map(h=>`<th>${escapeHtml(h)}</th>`).join('');
+  
+  let rowsHtml = '';
+  items.forEach((item, index) => {
+    const tds = headers.map(h=>`<td>${escapeHtml(item[h]??"")}</td>`).join('');
+    rowsHtml += `<tr style="animation-delay:${index*0.05}s">${tds}</tr>`;
+  });
+
+  tableWrap.innerHTML = `<table><thead><tr>${thead}</tr></thead><tbody>${rowsHtml}</tbody></table>`;
+}
+
+async function fetchAndRender(){
+  try{
+    const resp = await fetch(CSV_URL, {cache:"no-store"});
+    if(!resp.ok) throw new Error('Network response not OK: '+resp.status);
+    const text = await resp.text();
+    const {headers:hdr, items} = rowsToObjects(parseCSV(text));
+    headers = hdr; rawData = items;
+    buildTable(headers, rawData);
+    resultCountEl.textContent = '';
+  }catch(err){
+    console.error(err);
+    tableWrap.innerHTML = `<div class="not-found">දත්ත ලබාගත නොහැකි විය. ඉන්ටර්නෙට් සම්බන්ධතාව පරීක්ෂා කරන්න හෝ CSV ලින්ක් වලට ප්‍රවේශය පරීක්ෂා කරන්න.</div>`;
+  }
+}
+
+function performSearch(){
+  const q = qInput.value.trim().toLowerCase();
+  if(!q){ 
+    buildTable(headers, rawData); 
+    resultCountEl.textContent = '';
+    return; 
+  }
+  const filtered = rawData.filter(row=>{
+    for(const h of headers){
+      const v = (row[h]||'').toString().toLowerCase();
+      if(v.includes(q)) return true;
+    }
+    return false;
+  });
+  buildTable(headers, filtered);
+  resultCountEl.textContent = `"${q}" සඳහා ගමන් වාර ගණන: ${filtered.length}`;
+}
+
+btnSearch.addEventListener('click', performSearch);
+btnReset.addEventListener('click', ()=>{
+  qInput.value=''; 
+  buildTable(headers, rawData);
+  resultCountEl.textContent = '';
+});
+btnRefresh.addEventListener('click', fetchAndRender);
+qInput.addEventListener('keydown', e=>{
+  if(e.key==='Enter'){ e.preventDefault(); performSearch(); }
+  if(e.key==='Escape'){ 
+    qInput.value=''; 
+    buildTable(headers, rawData); 
+    resultCountEl.textContent = '';
+  }
+});
+
+fetchAndRender();
+let intervalId = setInterval(fetchAndRender, REFRESH_INTERVAL_MS);
+document.addEventListener('visibilitychange', ()=>{
+  if(document.hidden){ clearInterval(intervalId); }
+  else{ fetchAndRender(); intervalId = setInterval(fetchAndRender, REFRESH_INTERVAL_MS); }
+});
+</script>
+</body>
+</html>
